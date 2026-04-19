@@ -6,7 +6,7 @@
   Hardware objetivo:
     • ESP8266 NodeMCU V3  (seleccionar "NodeMCU 1.0 (ESP-12E Module)")
     • Sensor analógico K8 / C11 (AO → A0, DO → D5/GPIO14)
-    • Módulo relé 5 V active-low (GPIO HIGH = inactivo, GPIO LOW = activo)
+    • Módulo relé 5 V active-high (GPIO LOW = inactivo, GPIO HIGH = activo)
     • Electroválvula 12 V DC (contactos NO/COM del relé + diodo flyback)
 
   Cómo usar:
@@ -80,9 +80,9 @@ float rawToPercent(int raw) {
 // updateRelay(pct)
 // Evalúa la máquina de estados y acciona el relé y el LED.
 //
-// Lógica del pin de relé (active-low directo):
-//   GPIO HIGH → relé INACTIVO → válvula CERRADA  (estado seguro)
-//   GPIO LOW  → relé ACTIVO   → válvula ABIERTA
+// Lógica del pin de relé (active-high):
+//   GPIO LOW  → relé INACTIVO → válvula CERRADA  (estado seguro)
+//   GPIO HIGH → relé ACTIVO   → válvula ABIERTA
 //
 // LED interno (active-low):
 //   LOW  = LED encendido  (suelo seco)
@@ -96,7 +96,7 @@ void updateRelay(float pct) {
     case IDLE:
       if (pct < ON_THRESHOLD_PERCENT) {
         // Suelo seco: abre la válvula
-        digitalWrite(PIN_RELAY, LOW);   // LOW → relé activo → válvula abierta
+        digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé activo → válvula abierta
         relayStartMs = now;
         relayState   = WATERING;
         Serial.printf("[RIEGO] Iniciado. Humedad: %.1f%%\n", pct);
@@ -106,7 +106,7 @@ void updateRelay(float pct) {
     case WATERING:
       if (now - relayStartMs >= RELAY_ON_TIME_MS) {
         // Tiempo de riego completado: cierra la válvula
-        digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé inactivo → válvula cerrada
+        digitalWrite(PIN_RELAY, LOW);   // LOW → relé inactivo → válvula cerrada
         cooldownStartMs = now;
         relayState      = COOLDOWN;
         Serial.println("[RIEGO] Terminado. Iniciando cooldown.");
@@ -194,7 +194,7 @@ void setup() {
   pinMode(PIN_LED,   OUTPUT);
 
   // Estado seguro al arranque: válvula cerrada, LED apagado
-  digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé inactivo → válvula cerrada
+  digitalWrite(PIN_RELAY, LOW);   // LOW → relé inactivo → válvula cerrada
   digitalWrite(PIN_LED,   HIGH);  // active-low → LED apagado
 
   // Conectar a Wi-Fi
