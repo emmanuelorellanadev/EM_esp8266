@@ -41,6 +41,7 @@ enum RelayState {
 RelayState    relayState      = IDLE;
 unsigned long relayStartMs    = 0;   // marca de tiempo al iniciar riego
 unsigned long cooldownStartMs = 0;   // marca de tiempo al iniciar cooldown
+unsigned long lastWaterEndMs  = 0;   // marca de tiempo al terminar el último riego (0 = nunca)
 
 // ----------------------------------------------------------------
 // Últimos valores leídos (actualizados en segundo plano)
@@ -107,6 +108,7 @@ void updateRelay(float pct) {
       if (now - relayStartMs >= RELAY_ON_TIME_MS) {
         // Tiempo de riego completado: cierra la válvula
         digitalWrite(PIN_RELAY, LOW);   // LOW → relé inactivo → válvula cerrada
+        lastWaterEndMs  = now;
         cooldownStartMs = now;
         relayState      = COOLDOWN;
         Serial.println("[RIEGO] Terminado. Iniciando cooldown.");
@@ -138,6 +140,20 @@ void handleRoot() {
   else if (lastPercent < ON_THRESHOLD_PERCENT) estado = "SECO";
   else    estado = "HUMEDO";
 
+  String ultimoRiego;
+  if (lastWaterEndMs == 0) {
+    ultimoRiego = "Sin riego registrado";
+  } else {
+    unsigned long segs = (millis() - lastWaterEndMs) / 1000UL;
+    if (segs < 60) {
+      ultimoRiego = String(segs) + " seg";
+    } else if (segs < 3600) {
+      ultimoRiego = String(segs / 60) + " min " + String(segs % 60) + " seg";
+    } else {
+      ultimoRiego = String(segs / 3600) + " h " + String((segs % 3600) / 60) + " min";
+    }
+  }
+
   String html =
     "<!DOCTYPE html>"
     "<html lang='es'><head>"
@@ -156,6 +172,7 @@ void handleRoot() {
     "<div>Humedad del suelo</div></div>"
     "<div class='card'>ADC Raw: <b>" + String(lastRaw) + "</b></div>"
     "<div class='card'>Estado: <b>" + estado + "</b></div>"
+    "<div class='card'>Último riego: <b>" + ultimoRiego + "</b></div>"
     "<p><a href='/json'>Ver JSON</a></p>"
     "</body></html>";
 
@@ -170,12 +187,15 @@ void handleJson() {
   else if (lastPercent < ON_THRESHOLD_PERCENT) estado = "DRY";
   else    estado = "WET";
 
+  long secsAgo = (lastWaterEndMs == 0) ? -1L : (long)((millis() - lastWaterEndMs) / 1000UL);
+
   String json = "{";
-  json += "\"raw\":"      + String(lastRaw)                                + ",";
-  json += "\"percent\":"  + String(lastPercent, 1)                         + ",";
-  json += "\"watering\":" + String(relayState == WATERING ? "true":"false") + ",";
-  json += "\"cooldown\":" + String(relayState == COOLDOWN ? "true":"false") + ",";
-  json += "\"state\":\""  + estado + "\"";
+  json += "\"raw\":"              + String(lastRaw)                                + ",";
+  json += "\"percent\":"          + String(lastPercent, 1)                         + ",";
+  json += "\"watering\":"         + String(relayState == WATERING ? "true":"false") + ",";
+  json += "\"cooldown\":"         + String(relayState == COOLDOWN ? "true":"false") + ",";
+  json += "\"state\":\""          + estado                                         + "\",";
+  json += "\"last_watered_sec\":" + String(secsAgo);
   json += "}";
 
   server.send(200, "application/json", json);
