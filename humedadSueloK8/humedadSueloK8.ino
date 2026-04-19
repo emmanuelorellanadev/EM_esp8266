@@ -86,8 +86,8 @@ float rawToPercent(int raw) {
 //   GPIO HIGH → relé ACTIVO   → válvula ABIERTA
 //
 // LED interno (active-low):
-//   LOW  = LED encendido  (suelo seco)
-//   HIGH = LED apagado    (suelo húmedo o regando)
+//   LOW  = LED encendido  (relé activo → regando)
+//   HIGH = LED apagado    (relé inactivo)
 // ================================================================
 void updateRelay(float pct) {
   unsigned long now = millis();
@@ -123,9 +123,8 @@ void updateRelay(float pct) {
       break;
   }
 
-  // LED: encendido solo cuando el suelo está seco (y no está regando)
-  bool seco = (pct < ON_THRESHOLD_PERCENT);
-  digitalWrite(PIN_LED, seco ? LOW : HIGH);
+  // LED: encendido solo cuando el relé está activo (regando)
+  digitalWrite(PIN_LED, (relayState == WATERING) ? LOW : HIGH);
 }
 
 // ================================================================
