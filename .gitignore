@@ -1,3 +1,35 @@
+# ================================================================
+# Arduino / ESP8266
+# ================================================================
+
+# Archivo de credenciales — NUNCA subir config.h real al repositorio.
+# Crea tu copia local copiando config.example.h → config.h
+config.h
+
+# Artefactos de compilación de Arduino IDE
+build/
+*.elf
+*.bin
+*.hex
+*.map
+
+# PlatformIO (opcional)
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# ================================================================
+# Python (heredado)
+# ================================================================
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
