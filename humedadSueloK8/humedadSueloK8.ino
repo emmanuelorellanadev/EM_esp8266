@@ -6,7 +6,7 @@
   Hardware objetivo:
     • ESP8266 NodeMCU V3  (seleccionar "NodeMCU 1.0 (ESP-12E Module)")
     • Sensor analógico K8 / C11 (AO → A0, DO → D5/GPIO14)
-    • Módulo relé 5 V active-low (GPIO HIGH = inactivo, GPIO LOW = activo)
+    • Módulo relé 5 V active-high (GPIO LOW = inactivo, GPIO HIGH = activo)
     • Electroválvula 12 V DC (contactos NO/COM del relé + diodo flyback)
 
   Cómo usar:
@@ -41,6 +41,7 @@ enum RelayState {
 RelayState    relayState      = IDLE;
 unsigned long relayStartMs    = 0;   // marca de tiempo al iniciar riego
 unsigned long cooldownStartMs = 0;   // marca de tiempo al iniciar cooldown
+unsigned long lastWaterEndMs  = 0;   // marca de tiempo al terminar el último riego (0 = nunca)
 
 // ----------------------------------------------------------------
 // Últimos valores leídos (actualizados en segundo plano)
@@ -80,9 +81,9 @@ float rawToPercent(int raw) {
 // updateRelay(pct)
 // Evalúa la máquina de estados y acciona el relé y el LED.
 //
-// Lógica del pin de relé (active-low directo):
-//   GPIO HIGH → relé INACTIVO → válvula CERRADA  (estado seguro)
-//   GPIO LOW  → relé ACTIVO   → válvula ABIERTA
+// Lógica del pin de relé (active-high):
+//   GPIO LOW  → relé INACTIVO → válvula CERRADA  (estado seguro)
+//   GPIO HIGH → relé ACTIVO   → válvula ABIERTA
 //
 // LED interno (active-low):
 //   LOW  = LED encendido  (suelo seco)
@@ -96,7 +97,7 @@ void updateRelay(float pct) {
     case IDLE:
       if (pct < ON_THRESHOLD_PERCENT) {
         // Suelo seco: abre la válvula
-        digitalWrite(PIN_RELAY, LOW);   // LOW → relé activo → válvula abierta
+        digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé activo → válvula abierta
         relayStartMs = now;
         relayState   = WATERING;
         Serial.printf("[RIEGO] Iniciado. Humedad: %.1f%%\n", pct);
@@ -106,7 +107,8 @@ void updateRelay(float pct) {
     case WATERING:
       if (now - relayStartMs >= RELAY_ON_TIME_MS) {
         // Tiempo de riego completado: cierra la válvula
-        digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé inactivo → válvula cerrada
+        digitalWrite(PIN_RELAY, LOW);   // LOW → relé inactivo → válvula cerrada
+        lastWaterEndMs  = now;
         cooldownStartMs = now;
         relayState      = COOLDOWN;
         Serial.println("[RIEGO] Terminado. Iniciando cooldown.");
@@ -138,6 +140,20 @@ void handleRoot() {
   else if (lastPercent < ON_THRESHOLD_PERCENT) estado = "SECO";
   else    estado = "HUMEDO";
 
+  String ultimoRiego;
+  if (lastWaterEndMs == 0) {
+    ultimoRiego = "Sin riego registrado";
+  } else {
+    unsigned long segs = (millis() - lastWaterEndMs) / 1000UL;
+    if (segs < 60) {
+      ultimoRiego = String(segs) + " seg";
+    } else if (segs < 3600) {
+      ultimoRiego = String(segs / 60) + " min " + String(segs % 60) + " seg";
+    } else {
+      ultimoRiego = String(segs / 3600) + " h " + String((segs % 3600) / 60) + " min";
+    }
+  }
+
   String html =
     "<!DOCTYPE html>"
     "<html lang='es'><head>"
@@ -156,6 +172,7 @@ void handleRoot() {
     "<div>Humedad del suelo</div></div>"
     "<div class='card'>ADC Raw: <b>" + String(lastRaw) + "</b></div>"
     "<div class='card'>Estado: <b>" + estado + "</b></div>"
+    "<div class='card'>Último riego: <b>" + ultimoRiego + "</b></div>"
     "<p><a href='/json'>Ver JSON</a></p>"
     "</body></html>";
 
@@ -170,12 +187,15 @@ void handleJson() {
   else if (lastPercent < ON_THRESHOLD_PERCENT) estado = "DRY";
   else    estado = "WET";
 
+  long secsAgo = (lastWaterEndMs == 0) ? -1L : (long)((millis() - lastWaterEndMs) / 1000UL);
+
   String json = "{";
-  json += "\"raw\":"      + String(lastRaw)                                + ",";
-  json += "\"percent\":"  + String(lastPercent, 1)                         + ",";
-  json += "\"watering\":" + String(relayState == WATERING ? "true":"false") + ",";
-  json += "\"cooldown\":" + String(relayState == COOLDOWN ? "true":"false") + ",";
-  json += "\"state\":\""  + estado + "\"";
+  json += "\"raw\":"              + String(lastRaw)                                + ",";
+  json += "\"percent\":"          + String(lastPercent, 1)                         + ",";
+  json += "\"watering\":"         + String(relayState == WATERING ? "true":"false") + ",";
+  json += "\"cooldown\":"         + String(relayState == COOLDOWN ? "true":"false") + ",";
+  json += "\"state\":\""          + estado                                         + "\",";
+  json += "\"last_watered_sec\":" + String(secsAgo);
   json += "}";
 
   server.send(200, "application/json", json);
@@ -194,7 +214,7 @@ void setup() {
   pinMode(PIN_LED,   OUTPUT);
 
   // Estado seguro al arranque: válvula cerrada, LED apagado
-  digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé inactivo → válvula cerrada
+  digitalWrite(PIN_RELAY, LOW);   // LOW → relé inactivo → válvula cerrada
   digitalWrite(PIN_LED,   HIGH);  // active-low → LED apagado
 
   // Conectar a Wi-Fi
