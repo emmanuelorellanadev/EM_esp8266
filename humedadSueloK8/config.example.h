@@ -4,7 +4,7 @@
 
   INSTRUCCIONES:
     1. Copia este archivo: cp config.example.h config.h
-    2. Edita config.h con tu SSID, contraseña y calibración.
+    2. Edita config.h con tu SSID y contraseña real.
     3. NUNCA subas config.h al repositorio (ya está en .gitignore).
 
   Todos los parámetros están comentados para que sepas qué ajustar

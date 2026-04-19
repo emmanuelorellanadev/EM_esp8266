@@ -4,7 +4,7 @@ Firmware para **ESP8266 NodeMCU V3** que:
 
 - Lee la humedad del suelo con un sensor capacitivo **K8/C11** (salida analógica AO).
 - Expone un **servidor web** (HTML + JSON) accesible desde la red local.
-- Activa una **electroválvula 12 V DC** a través de un módulo relé 5 V cuando la humedad cae por debajo del umbral configurado, con enfriamiento para evitar riegos continuos.
+- Activa una **electroválvula 12 V DC** a través de un módulo relé 5 V cuando la humedad cae por debajo del umbral configurado, con cooldown para evitar riegos continuos.
 
 ---
 
@@ -119,7 +119,7 @@ El sensor K8/C11 devuelve un valor ADC entre 0 y 1023.
 El firmware convierte ese valor a porcentaje con la fórmula:
 
 ```
-porcentaje = (RAW_DRY - raw) / (RAW_DRY - RAW_WET) × 100
+percent = (RAW_DRY - raw) / (RAW_DRY - RAW_WET) × 100
 ```
 
 ### Cómo obtener RAW_DRY y RAW_WET
@@ -140,9 +140,9 @@ porcentaje = (RAW_DRY - raw) / (RAW_DRY - RAW_WET) × 100
 El sistema usa una **máquina de 3 estados**:
 
 ```
-  INACTIVO ──(porcentaje < ON_THRESHOLD)──► EN_RIEGO ──(RELAY_ON_TIME_MS)──► EN_ENFRIAMIENTO
-      ▲                                                                              │
-      └──────────────────────────(COOLDOWN_MS)──────────────────────────────────────┘
+  IDLE ──(percent < ON_THRESHOLD)──► WATERING ──(RELAY_ON_TIME_MS)──► COOLDOWN
+    ▲                                                                      │
+    └────────────────────(COOLDOWN_MS)────────────────────────────────────┘
 ```
 
 | Parámetro | Default | Descripción |
@@ -154,7 +154,7 @@ El sistema usa una **máquina de 3 estados**:
 | `ANALOG_SAMPLES` | 20 | Muestras promediadas por lectura |
 | `ANALOG_DELAY_MS` | 5 ms | Retardo entre muestras (reduce ruido) |
 
-**LED interno** (active-low): encendido cuando `porcentaje < ON_THRESHOLD_PERCENT`, apagado en caso contrario.
+**LED interno** (active-low): encendido cuando `percent < ON_THRESHOLD_PERCENT`, apagado en caso contrario.
 
 ---
 
@@ -165,7 +165,7 @@ El sistema usa una **máquina de 3 estados**:
 Página HTML con:
 - Porcentaje de humedad actual
 - Valor ADC Raw
-- Estado del sistema (SECO / HUMEDO / REGANDO / ENFRIAMIENTO)
+- Estado del sistema (SECO / HUMEDO / REGANDO / COOLDOWN)
 - Enlace a `/json`
 
 ### `GET /json`
@@ -173,14 +173,14 @@ Página HTML con:
 ```json
 {
   "raw": 480,
-  "porcentaje": 30.2,
-  "regando": false,
-  "enfriamiento": false,
-  "estado": "SECO"
+  "percent": 30.2,
+  "watering": false,
+  "cooldown": false,
+  "state": "DRY"
 }
 ```
 
-Valores posibles de `estado`: `"SECO"`, `"HUMEDO"`, `"REGANDO"`, `"ENFRIAMIENTO"`.
+Valores posibles de `state`: `"DRY"`, `"WET"`, `"WATERING"`, `"COOLDOWN"`.
 
 ---
 
