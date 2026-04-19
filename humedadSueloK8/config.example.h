@@ -28,8 +28,9 @@
 
 // Pin de control del relé:
 //   D1 en NodeMCU V3 = GPIO 5
-//   Conectado a la base del NPN (2N2222 / 2N3904) a través de R=1 kΩ.
-//   HIGH en este pin → NPN activo → relé IN = LOW → relé activa (active-low)
+//   Lógica active-low directa:
+//     HIGH → relé INACTIVO → válvula CERRADA (estado seguro al arranque)
+//     LOW  → relé ACTIVO   → válvula ABIERTA
 #define PIN_RELAY 5
 
 // LED interno del NodeMCU (active-low: LOW = encendido).
