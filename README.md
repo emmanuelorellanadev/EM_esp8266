@@ -1,10 +1,11 @@
-# EM_esp8266 — Monitor de Humedad con Riego Temporizado
+# EM_esp8266 — Monitor de Humedad con Riego Temporizado y MQTT
 
 Firmware para **ESP8266 NodeMCU V3** que:
 
 - Lee la humedad del suelo con un sensor capacitivo **K8/C11** (salida analógica AO).
 - Expone un **servidor web** (HTML + JSON) accesible desde la red local.
-- Activa una **electroválvula 12 V DC** a través de un módulo relé 5 V cuando la humedad cae por debajo del umbral configurado, con cooldown para evitar riegos continuos.
+- Activa una **electroválvula 12 V DC** a través de un módulo relé 5 V cuando la humedad cae por debajo del umbral configurado, con enfriamiento para evitar riegos continuos.
+- Publica los datos del sensor vía **MQTT** a una Raspberry Pi (u otro broker) para almacenamiento y análisis.
 
 ---
 
@@ -16,9 +17,10 @@ Firmware para **ESP8266 NodeMCU V3** que:
 4. [Calibración del sensor (RAW_DRY / RAW_WET)](#4-calibración-del-sensor)
 5. [Lógica de riego y parámetros](#5-lógica-de-riego-y-parámetros)
 6. [Servidor web](#6-servidor-web)
-7. [¿Qué es "active-low" y por qué usamos NPN?](#7-qué-es-active-low-y-por-qué-usamos-npn)
-8. [Riesgos de compartir GND con fuentes separadas](#8-riesgos-de-compartir-gnd-con-fuentes-separadas)
-9. [Troubleshooting](#9-troubleshooting)
+7. [Integración MQTT con Raspberry Pi](#7-integración-mqtt-con-raspberry-pi)
+8. [¿Qué es "active-low" y por qué usamos NPN?](#8-qué-es-active-low-y-por-qué-usamos-npn)
+9. [Riesgos de compartir GND con fuentes separadas](#9-riesgos-de-compartir-gnd-con-fuentes-separadas)
+10. [Troubleshooting](#10-troubleshooting)
 
 ---
 
@@ -90,6 +92,7 @@ Firmware para **ESP8266 NodeMCU V3** que:
   `http://arduino.esp8266.com/stable/package_esp8266com_index.json`  
   e instala el paquete **ESP8266 by ESP8266 Community**.
 - Placa a seleccionar: **NodeMCU 1.0 (ESP-12E Module)**
+- Biblioteca **PubSubClient**: en Arduino IDE ve a *Sketch → Incluir Biblioteca → Gestionar Bibliotecas*, busca `PubSubClient` (autor: Nick O'Leary) e instálala.
 
 ### Pasos
 
@@ -103,12 +106,13 @@ cp config.example.h config.h
 
 # 3. Edita config.h con tu editor favorito
 #    — Cambia WIFI_SSID y WIFI_PASS
+#    — Ajusta MQTT_SERVIDOR con la IP de tu Raspberry Pi
 #    — Ajusta RAW_DRY / RAW_WET con tus mediciones (ver sección 4)
 ```
 
 4. Abre `humedadSueloK8/humedadSueloK8.ino` en Arduino IDE.  
 5. Selecciona la placa, el puerto COM correcto y sube el firmware.  
-6. Abre el Monitor Serie a **115200 baud** para ver la IP asignada.  
+6. Abre el Monitor Serie a **115200 baud** para ver la IP asignada y el estado MQTT.  
 7. Navega a `http://<IP>/` en tu navegador.
 
 ---
@@ -119,7 +123,7 @@ El sensor K8/C11 devuelve un valor ADC entre 0 y 1023.
 El firmware convierte ese valor a porcentaje con la fórmula:
 
 ```
-percent = (RAW_DRY - raw) / (RAW_DRY - RAW_WET) × 100
+porcentaje = (RAW_DRY - raw) / (RAW_DRY - RAW_WET) × 100
 ```
 
 ### Cómo obtener RAW_DRY y RAW_WET
@@ -140,9 +144,9 @@ percent = (RAW_DRY - raw) / (RAW_DRY - RAW_WET) × 100
 El sistema usa una **máquina de 3 estados**:
 
 ```
-  IDLE ──(percent < ON_THRESHOLD)──► WATERING ──(RELAY_ON_TIME_MS)──► COOLDOWN
-    ▲                                                                      │
-    └────────────────────(COOLDOWN_MS)────────────────────────────────────┘
+  INACTIVO ──(porcentaje < ON_THRESHOLD)──► EN_RIEGO ──(RELAY_ON_TIME_MS)──► EN_ENFRIAMIENTO
+      ▲                                                                              │
+      └──────────────────────────(COOLDOWN_MS)──────────────────────────────────────┘
 ```
 
 | Parámetro | Default | Descripción |
@@ -154,7 +158,7 @@ El sistema usa una **máquina de 3 estados**:
 | `ANALOG_SAMPLES` | 20 | Muestras promediadas por lectura |
 | `ANALOG_DELAY_MS` | 5 ms | Retardo entre muestras (reduce ruido) |
 
-**LED interno** (active-low): encendido cuando `percent < ON_THRESHOLD_PERCENT`, apagado en caso contrario.
+**LED interno** (active-low): encendido cuando `porcentaje < ON_THRESHOLD_PERCENT`, apagado en caso contrario.
 
 ---
 
@@ -165,7 +169,7 @@ El sistema usa una **máquina de 3 estados**:
 Página HTML con:
 - Porcentaje de humedad actual
 - Valor ADC Raw
-- Estado del sistema (SECO / HUMEDO / REGANDO / COOLDOWN)
+- Estado del sistema (SECO / HUMEDO / REGANDO / ENFRIAMIENTO)
 - Enlace a `/json`
 
 ### `GET /json`
@@ -173,18 +177,76 @@ Página HTML con:
 ```json
 {
   "raw": 480,
-  "percent": 30.2,
-  "watering": false,
-  "cooldown": false,
-  "state": "DRY"
+  "porcentaje": 30.2,
+  "regando": false,
+  "enfriamiento": false,
+  "estado": "SECO"
 }
 ```
 
-Valores posibles de `state`: `"DRY"`, `"WET"`, `"WATERING"`, `"COOLDOWN"`.
+Valores posibles de `estado`: `"SECO"`, `"HUMEDO"`, `"REGANDO"`, `"ENFRIAMIENTO"`.
 
 ---
 
-## 7. ¿Qué es "active-low" y por qué usamos NPN?
+## 7. Integración MQTT con Raspberry Pi
+
+El firmware publica un mensaje JSON en cada ciclo de muestreo (`BACKGROUND_SAMPLE_MS`) al broker MQTT configurado en `config.h`.
+
+### Configurar Mosquitto en la Raspberry Pi
+
+```bash
+# Instalar el broker Mosquitto
+sudo apt update && sudo apt install mosquitto mosquitto-clients -y
+sudo systemctl enable --now mosquitto
+
+# Verificar que esté corriendo
+sudo systemctl status mosquitto
+
+# Escuchar todos los mensajes del tópico (para probar)
+mosquitto_sub -h localhost -t "huerto/humedad" -v
+```
+
+### Formato del mensaje publicado
+
+```json
+{"raw":450,"porcentaje":52.3,"regando":false,"enfriamiento":false,"estado":"HUMEDO"}
+```
+
+### Almacenar datos con InfluxDB + Telegraf (recomendado)
+
+Un pipeline simple para almacenar y graficar los datos en la Raspberry Pi:
+
+```bash
+# 1. Instalar InfluxDB
+sudo apt install influxdb -y
+sudo systemctl enable --now influxdb
+
+# 2. Instalar Telegraf (agente que lee MQTT y escribe en InfluxDB)
+sudo apt install telegraf -y
+```
+
+Agrega este bloque en `/etc/telegraf/telegraf.conf`:
+
+```toml
+[[inputs.mqtt_consumer]]
+  servers = ["tcp://localhost:1883"]
+  topics  = ["huerto/humedad"]
+  data_format = "json"
+
+[[outputs.influxdb]]
+  urls    = ["http://localhost:8086"]
+  database = "huerto"
+```
+
+```bash
+sudo systemctl restart telegraf
+```
+
+Los datos quedarán almacenados en InfluxDB y se pueden visualizar con **Grafana** apuntando a esa base de datos.
+
+---
+
+## 8. ¿Qué es "active-low" y por qué usamos NPN?
 
 Un relé **active-low** se activa cuando su pin `IN` recibe un nivel **BAJO (0 V)**.  
 El ESP8266 opera a 3.3 V y sus pines no pueden suministrar suficiente corriente para activar directamente la bobina de un módulo relé de 5 V.
@@ -204,7 +266,7 @@ La resistencia de **100 kΩ** entre base y emisor (pull-down) garantiza que el t
 
 ---
 
-## 8. Riesgos de compartir GND con fuentes separadas
+## 9. Riesgos de compartir GND con fuentes separadas
 
 Cuando se usan dos fuentes de alimentación (5 V para el ESP y 12 V para la válvula), **sus GND deben conectarse en un solo punto** para que las señales de control sean coherentes.
 
@@ -219,7 +281,7 @@ Cuando se usan dos fuentes de alimentación (5 V para el ESP y 12 V para la vál
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Síntoma | Causa probable | Solución |
 |---|---|---|
@@ -230,6 +292,9 @@ Cuando se usan dos fuentes de alimentación (5 V para el ESP y 12 V para la vál
 | La válvula no cierra del todo | Corriente residual o relé defectuoso | Verificar que el relé use contactos NO/COM correctamente |
 | Porcentaje fuera de rango (>100% o <0%) | RAW_DRY o RAW_WET mal calibrados | Recalibrar siguiendo la sección 4 |
 | No aparece IP en Monitor Serie | Credenciales Wi-Fi incorrectas | Verificar SSID y PASS en config.h; reiniciar el ESP |
+| `[MQTT] fallo (rc=-2)` en Monitor Serie | IP del broker incorrecta o broker apagado | Verificar `MQTT_SERVIDOR` en config.h; comprobar que Mosquitto esté activo |
+| `[MQTT] fallo (rc=-4)` en Monitor Serie | Tiempo de espera agotado (timeout de red) | Verificar que el puerto 1883 esté abierto en el firewall de la Raspberry Pi |
+| No llegan mensajes a `mosquitto_sub` | Tópico incorrecto o cliente no conecta | Verificar `MQTT_TOPICO` en config.h; comprobar logs con `journalctl -u mosquitto` |
 
 ---
 
