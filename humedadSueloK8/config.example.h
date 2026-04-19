@@ -4,7 +4,7 @@
 
   INSTRUCCIONES:
     1. Copia este archivo: cp config.example.h config.h
-    2. Edita config.h con tu SSID, contraseña, IP del broker MQTT y calibración.
+    2. Edita config.h con tu SSID, contraseña y calibración.
     3. NUNCA subas config.h al repositorio (ya está en .gitignore).
 
   Todos los parámetros están comentados para que sepas qué ajustar
@@ -16,24 +16,6 @@
 // ================================================================
 #define WIFI_SSID "TU_RED_WIFI"      // Nombre de tu red (SSID)
 #define WIFI_PASS "TU_CONTRASENA"    // Contraseña de tu red
-
-// ================================================================
-// MQTT — Conexión al broker en la Raspberry Pi
-// ================================================================
-// Instala Mosquitto en la Raspberry Pi para tener el broker:
-//   sudo apt install mosquitto mosquitto-clients
-//   sudo systemctl enable mosquitto
-//
-// Asegúrate de que la Raspberry Pi y el ESP8266 estén en la
-// misma red local y de que el firewall permita el puerto 1883.
-#define MQTT_SERVIDOR   "192.168.1.100"   // IP local de tu Raspberry Pi
-#define MQTT_PUERTO     1883              // Puerto estándar MQTT (sin TLS)
-#define MQTT_ID_CLIENTE "esp8266-huerto"  // Identificador único del cliente MQTT
-#define MQTT_TOPICO     "huerto/humedad"  // Tópico donde se publican los datos
-
-// Si tu broker requiere autenticación, descomenta y completa estas líneas:
-// #define MQTT_USUARIO "usuario"
-// #define MQTT_CLAVE   "clave"
 
 // ================================================================
 // Pines (numeración GPIO real, no la etiqueta D1/D5 de la placa)

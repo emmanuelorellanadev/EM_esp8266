@@ -1,8 +1,7 @@
 /*
   humedadSueloK8.ino
   ──────────────────────────────────────────────────────────────────
-  Monitor de humedad de suelo con servidor web, riego temporizado
-  y publicación de datos vía MQTT a Raspberry Pi para almacenamiento.
+  Monitor de humedad de suelo con servidor web y riego temporizado.
 
   Hardware objetivo:
     • ESP8266 NodeMCU V3  (seleccionar "NodeMCU 1.0 (ESP-12E Module)")
@@ -12,37 +11,23 @@
 
   Cómo usar:
     1. Copia humedadSueloK8/config.example.h → humedadSueloK8/config.h
-    2. Edita config.h con tu SSID, contraseña, IP del broker MQTT y calibración.
-    3. Instala la biblioteca PubSubClient (Arduino IDE → Gestionar Bibliotecas
-       → busca "PubSubClient" de Nick O'Leary).
-    4. Compila y sube en Arduino IDE.
+    2. Edita config.h con tu SSID, contraseña y calibración.
+    3. Compila y sube en Arduino IDE.
 
   Endpoints web:
     GET /       → página HTML con estado actual
     GET /json   → respuesta JSON para integración con otros sistemas
-
-  MQTT:
-    Tópico (configurable en config.h): MQTT_TOPICO
-    Payload JSON publicado en cada ciclo de muestreo:
-      {"raw":450,"porcentaje":52.3,"regando":false,"enfriamiento":false,"estado":"HUMEDO"}
   ──────────────────────────────────────────────────────────────────
 */
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <PubSubClient.h>
 #include "config.h"   // ← crea este archivo desde config.example.h
 
 // ----------------------------------------------------------------
 // Servidor web en el puerto 80
 // ----------------------------------------------------------------
 ESP8266WebServer servidor(80);
-
-// ----------------------------------------------------------------
-// Cliente MQTT (usa la conexión Wi-Fi existente)
-// ----------------------------------------------------------------
-WiFiClient    clienteWifi;
-PubSubClient  clienteMQTT(clienteWifi);
 
 // ----------------------------------------------------------------
 // Máquina de estados para el control del riego
@@ -148,68 +133,6 @@ void actualizarRele(float pct) {
 }
 
 // ================================================================
-// reconectarMQTT()
-// Intenta (re)conectar al broker MQTT. Realiza hasta 5 intentos con
-// una pausa de 2 segundos entre cada uno para no bloquear el sistema.
-// Devuelve true si la conexión quedó establecida.
-// ================================================================
-bool reconectarMQTT() {
-  int intentos = 0;
-  while (!clienteMQTT.connected() && intentos < 5) {
-    Serial.print("[MQTT] Conectando al broker...");
-    if (clienteMQTT.connect(MQTT_ID_CLIENTE)) {
-      Serial.println(" conectado.");
-    } else {
-      Serial.printf(" fallo (rc=%d). Reintentando en 2 s...\n", clienteMQTT.state());
-      delay(2000);
-      intentos++;
-    }
-  }
-  return clienteMQTT.connected();
-}
-
-// ================================================================
-// publicarMQTT()
-// Construye un payload JSON con los datos actuales del sensor y
-// lo publica en el tópico definido en config.h (MQTT_TOPICO).
-// Si la conexión al broker se perdió, intenta reconectar antes
-// de publicar; si no lo logra, omite la publicación este ciclo.
-//
-// Ejemplo de payload publicado:
-//   {"raw":450,"porcentaje":52.3,"regando":false,"enfriamiento":false,"estado":"HUMEDO"}
-// ================================================================
-void publicarMQTT() {
-  if (!clienteMQTT.connected()) {
-    if (!reconectarMQTT()) {
-      Serial.println("[MQTT] No se pudo reconectar. Publicación omitida este ciclo.");
-      return;
-    }
-  }
-
-  // Determinar texto descriptivo del estado actual
-  String estado;
-  if      (estadoRele == EN_RIEGO)          estado = "REGANDO";
-  else if (estadoRele == EN_ENFRIAMIENTO)   estado = "ENFRIAMIENTO";
-  else if (ultimoPorcentaje < ON_THRESHOLD_PERCENT) estado = "SECO";
-  else    estado = "HUMEDO";
-
-  // Construir payload JSON manualmente (sin dependencias extra)
-  String payload = "{";
-  payload += "\"raw\":"          + String(ultimoRaw)                                           + ",";
-  payload += "\"porcentaje\":"   + String(ultimoPorcentaje, 1)                                 + ",";
-  payload += "\"regando\":"      + String(estadoRele == EN_RIEGO        ? "true" : "false")    + ",";
-  payload += "\"enfriamiento\":" + String(estadoRele == EN_ENFRIAMIENTO ? "true" : "false")    + ",";
-  payload += "\"estado\":\""     + estado + "\"";
-  payload += "}";
-
-  if (clienteMQTT.publish(MQTT_TOPICO, payload.c_str())) {
-    Serial.printf("[MQTT] Publicado en '%s': %s\n", MQTT_TOPICO, payload.c_str());
-  } else {
-    Serial.println("[MQTT] Error al publicar. El broker puede haber cerrado la conexión.");
-  }
-}
-
-// ================================================================
 // Manejadores del servidor web
 // ================================================================
 
@@ -266,8 +189,8 @@ void manejarJson() {
 
 // ================================================================
 // setup()
-// Se ejecuta una sola vez al arrancar. Inicializa pines, Wi-Fi,
-// MQTT y el servidor web, y realiza la primera lectura del sensor.
+// Se ejecuta una sola vez al arrancar. Inicializa pines, Wi-Fi
+// y el servidor web, y realiza la primera lectura del sensor.
 // ================================================================
 void setup() {
   Serial.begin(115200);
@@ -293,10 +216,6 @@ void setup() {
   Serial.print("[WIFI] Conectado. IP: ");
   Serial.println(WiFi.localIP());
 
-  // Configurar y conectar al broker MQTT (Raspberry Pi)
-  clienteMQTT.setServer(MQTT_SERVIDOR, MQTT_PUERTO);
-  reconectarMQTT();
-
   // Registrar rutas del servidor web y arrancarlo
   servidor.on("/",     manejarRaiz);
   servidor.on("/json", manejarJson);
@@ -312,13 +231,10 @@ void setup() {
 
 // ================================================================
 // loop()
-// Se ejecuta continuamente. Atiende peticiones web, procesa el
-// keepalive MQTT, muestrea el sensor periódicamente y controla el relé.
+// Se ejecuta continuamente. Atiende peticiones web, muestrea el
+// sensor periódicamente y controla el relé.
 // ================================================================
 void loop() {
-  // Mantener la conexión MQTT activa (procesa mensajes y envía keepalive)
-  clienteMQTT.loop();
-
   // Atender peticiones del servidor web
   servidor.handleClient();
 
@@ -330,9 +246,6 @@ void loop() {
     ultimoRaw        = leerADC();
     ultimoPorcentaje = rawAPorcentaje(ultimoRaw);
     Serial.printf("[ADC] Raw: %d | Humedad: %.1f%%\n", ultimoRaw, ultimoPorcentaje);
-
-    // Publicar los datos actualizados al broker MQTT para almacenamiento
-    publicarMQTT();
   }
 
   // Evaluar y actualizar el relé y el LED según el porcentaje actual
