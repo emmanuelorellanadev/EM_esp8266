@@ -1,7 +1,8 @@
 /*
   humedadSueloK8.ino
   ──────────────────────────────────────────────────────────────────
-  Monitor de humedad de suelo con servidor web y riego temporizado.
+  Monitor de humedad de suelo con servidor web, riego temporizado
+  y publicación de datos vía MQTT.
 
   Hardware objetivo:
     • ESP8266 NodeMCU V3  (seleccionar "NodeMCU 1.0 (ESP-12E Module)")
@@ -11,23 +12,40 @@
 
   Cómo usar:
     1. Copia humedadSueloK8/config.example.h → humedadSueloK8/config.h
-    2. Edita config.h con tu SSID, contraseña y calibración.
-    3. Compila y sube en Arduino IDE.
+    2. Edita config.h con tu SSID, contraseña, calibración y datos MQTT.
+    3. Instala la librería "PubSubClient" de Nick O'Leary (Library Manager).
+    4. Compila y sube en Arduino IDE.
 
   Endpoints web:
     GET /       → página HTML con estado actual
     GET /json   → respuesta JSON para integración con otros sistemas
+
+  MQTT:
+    Publica en MQTT_TOPICO cada BACKGROUND_SAMPLE_MS.
+    Formato: {"raw":0,"percent":0.0,"state":"WET","watering":false,"cooldown":false}
+    Si MQTT_SERVER está vacío ("") se omite toda la lógica MQTT.
   ──────────────────────────────────────────────────────────────────
 */
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <PubSubClient.h>
 #include "config.h"   // ← crea este archivo desde config.example.h
 
 // ----------------------------------------------------------------
 // Servidor web en el puerto 80
 // ----------------------------------------------------------------
 ESP8266WebServer server(80);
+
+// ----------------------------------------------------------------
+// Cliente MQTT
+// ----------------------------------------------------------------
+WiFiClient   wifiClient;
+PubSubClient mqtt(wifiClient);
+
+// Marca de tiempo del último intento de reconexión MQTT
+unsigned long lastMqttAttemptMs = 0;
+#define MQTT_RECONNECT_INTERVAL_MS 5000UL
 
 // ----------------------------------------------------------------
 // Máquina de estados para el control del riego
@@ -201,6 +219,64 @@ void handleJson() {
 }
 
 // ================================================================
+// reconnectMQTT()
+// Intenta conectar (o reconectar) al broker.
+// Retorna true si está conectado al finalizar, false si falló.
+// Sólo actúa si MQTT_SERVER no está vacío.
+// ================================================================
+bool reconnectMQTT() {
+  if (strlen(MQTT_SERVER) == 0) return false;
+  if (mqtt.connected()) return true;
+
+  Serial.print("[MQTT] Conectando a ");
+  Serial.print(MQTT_SERVER);
+  Serial.print("...");
+
+  bool ok;
+  if (strlen(MQTT_USER) > 0) {
+    ok = mqtt.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS_BROKER);
+  } else {
+    ok = mqtt.connect(MQTT_CLIENT_ID);
+  }
+
+  if (ok) {
+    Serial.println(" OK");
+  } else {
+    Serial.print(" FALLO (rc=");
+    Serial.print(mqtt.state());
+    Serial.println(")");
+  }
+  return ok;
+}
+
+// ================================================================
+// publicarMQTT()
+// Publica el estado actual en formato JSON al tópico configurado.
+// Sólo actúa si el cliente está conectado.
+// ================================================================
+void publicarMQTT() {
+  if (!mqtt.connected()) return;
+
+  String estado;
+  if      (relayState == WATERING) estado = "WATERING";
+  else if (relayState == COOLDOWN) estado = "COOLDOWN";
+  else if (lastPercent < ON_THRESHOLD_PERCENT) estado = "DRY";
+  else    estado = "WET";
+
+  String json = "{";
+  json += "\"raw\":"       + String(lastRaw)                                + ",";
+  json += "\"percent\":"   + String(lastPercent, 1)                         + ",";
+  json += "\"watering\":"  + String(relayState == WATERING ? "true":"false") + ",";
+  json += "\"cooldown\":"  + String(relayState == COOLDOWN ? "true":"false") + ",";
+  json += "\"state\":\""   + estado                                         + "\"";
+  json += "}";
+
+  bool publicado = mqtt.publish(MQTT_TOPICO, json.c_str());
+  Serial.printf("[MQTT] Publicado en %s: %s (%s)\n",
+                MQTT_TOPICO, json.c_str(), publicado ? "OK" : "FALLO");
+}
+
+// ================================================================
 // setup()
 // ================================================================
 void setup() {
@@ -233,6 +309,12 @@ void setup() {
   server.begin();
   Serial.println("[WEB] Servidor iniciado en puerto 80");
 
+  // Configurar cliente MQTT (sólo si hay broker configurado)
+  if (strlen(MQTT_SERVER) > 0) {
+    mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+    reconnectMQTT();
+  }
+
   // Primera lectura
   lastRaw     = readADC();
   lastPercent = rawToPercent(lastRaw);
@@ -247,6 +329,16 @@ void loop() {
   // Atender peticiones web
   server.handleClient();
 
+  // Mantener la conexión MQTT viva
+  if (strlen(MQTT_SERVER) > 0) {
+    unsigned long now = millis();
+    if (!mqtt.connected() && (now - lastMqttAttemptMs >= MQTT_RECONNECT_INTERVAL_MS)) {
+      lastMqttAttemptMs = now;
+      reconnectMQTT();
+    }
+    mqtt.loop();
+  }
+
   unsigned long now = millis();
 
   // Muestreo en segundo plano cada BACKGROUND_SAMPLE_MS
@@ -255,6 +347,9 @@ void loop() {
     lastRaw      = readADC();
     lastPercent  = rawToPercent(lastRaw);
     Serial.printf("[ADC] Raw: %d | Humedad: %.1f%%\n", lastRaw, lastPercent);
+
+    // Publicar datos al broker MQTT tras cada muestra
+    publicarMQTT();
   }
 
   // Actualizar relé y LED según el estado actual
