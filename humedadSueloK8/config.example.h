@@ -92,3 +92,24 @@
 // Cada cuántos ms se lee el sensor y se actualiza el control
 // cuando no hay petición web activa
 #define BACKGROUND_SAMPLE_MS  3000UL   // 3 segundos
+
+// ================================================================
+// MQTT  — publicación de datos al broker
+// ================================================================
+// Instala la librería "PubSubClient" de Nick O'Leary desde el
+// Library Manager de Arduino IDE antes de compilar.
+//
+// El firmware publica un JSON al tópico cada BACKGROUND_SAMPLE_MS.
+// Formato:
+//   {"raw":0,"percent":0.0,"state":"WET","watering":false,"cooldown":false}
+//
+// Si no quieres usar MQTT, deja MQTT_SERVER vacío ("") y el firmware
+// omitirá toda la lógica MQTT sin afectar el servidor web ni el riego.
+#define MQTT_SERVER      "192.168.1.100"      // IP o hostname del broker
+#define MQTT_PORT        1883                  // Puerto TCP (default 1883)
+#define MQTT_CLIENT_ID   "esp8266_suelo"      // ID único por dispositivo
+#define MQTT_TOPICO      "humedadsuelo/datos" // Tópico de publicación
+
+// Autenticación — dejar vacío si el broker no requiere usuario/contraseña
+#define MQTT_USER        ""
+#define MQTT_PASS_BROKER ""
