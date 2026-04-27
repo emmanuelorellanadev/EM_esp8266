@@ -21,8 +21,10 @@
     GET /json   → respuesta JSON para integración con otros sistemas
 
   MQTT:
-    Publica en MQTT_TOPICO cada BACKGROUND_SAMPLE_MS.
-    Formato: {"raw":0,"percent":0.0,"state":"WET","watering":false,"cooldown":false}
+    Publicación → envía a MQTT_TOPICO cada BACKGROUND_SAMPLE_MS.
+      Formato: {"raw":0,"percent":0.0,"state":"WET","watering":false,"cooldown":false}
+    Suscripción → escucha en MQTT_TOPICO_CMD.
+      Comando soportado: {"action":"water"} → activa el riego remotamente.
     Si MQTT_SERVER está vacío ("") se omite toda la lógica MQTT.
   ──────────────────────────────────────────────────────────────────
 */
@@ -219,8 +221,38 @@ void handleJson() {
 }
 
 // ================================================================
+// mqttCallback(topic, payload, length)
+// Se invoca automáticamente por PubSubClient cuando llega un
+// mensaje en cualquier tópico al que el cliente esté suscrito.
+//
+// Tópico escuchado: MQTT_TOPICO_CMD  (p. ej. "commands/esp8266")
+// Comando soportado:
+//   {"action":"water"}  →  activa el riego si el sistema está en IDLE
+// ================================================================
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  // Construir string directamente desde el buffer del payload
+  String msg((char*)payload, length);
+  Serial.printf("[MQTT] Mensaje recibido en %s: %s\n", topic, msg.c_str());
+
+  // Comando de riego remoto: {"action":"water"}
+  // Se comprueba la cadena exacta para evitar falsos positivos
+  // (p. ej. {"action":"watermelon"} o {"description":"water"} no coinciden).
+  if (msg.indexOf("\"action\":\"water\"") >= 0) {
+    if (relayState == IDLE) {
+      digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé activo → válvula abierta
+      relayStartMs = millis();
+      relayState   = WATERING;
+      Serial.println("[MQTT] Riego activado remotamente.");
+    } else {
+      Serial.println("[MQTT] Comando 'water' ignorado (riego ya activo o en cooldown).");
+    }
+  }
+}
+
+// ================================================================
 // reconnectMQTT()
 // Intenta conectar (o reconectar) al broker.
+// Tras conectar, se suscribe a MQTT_TOPICO_CMD para recibir comandos.
 // Retorna true si está conectado al finalizar, false si falló.
 // Sólo actúa si MQTT_SERVER no está vacío.
 // ================================================================
@@ -241,6 +273,12 @@ bool reconnectMQTT() {
 
   if (ok) {
     Serial.println(" OK");
+    // Suscribir al tópico de comandos para recibir órdenes remotas
+    if (mqtt.subscribe(MQTT_TOPICO_CMD)) {
+      Serial.printf("[MQTT] Suscrito a %s\n", MQTT_TOPICO_CMD);
+    } else {
+      Serial.printf("[MQTT] Error: fallo al suscribir a %s\n", MQTT_TOPICO_CMD);
+    }
   } else {
     Serial.print(" FALLO (rc=");
     Serial.print(mqtt.state());
@@ -312,6 +350,7 @@ void setup() {
   // Configurar cliente MQTT (sólo si hay broker configurado)
   if (strlen(MQTT_SERVER) > 0) {
     mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+    mqtt.setCallback(mqttCallback);   // registrar función de recepción
     reconnectMQTT();
   }
 
