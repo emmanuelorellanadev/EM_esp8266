@@ -94,55 +94,21 @@
 #define BACKGROUND_SAMPLE_MS  3000UL   // 3 segundos
 
 // ================================================================
-// MQTT  — publicación y recepción de datos vía broker
+// MQTT  — publicación de datos al broker
 // ================================================================
 // Instala la librería "PubSubClient" de Nick O'Leary desde el
 // Library Manager de Arduino IDE antes de compilar.
 //
-// MQTT (Message Queuing Telemetry Transport) es un protocolo de
-// mensajería ligero basado en el patrón publicar/suscribir (pub/sub).
-// Funciona sobre TCP/IP con un servidor central llamado "broker"
-// (p. ej. Mosquitto corriendo en la Raspberry Pi).
-//
-// Ventajas de MQTT para IoT:
-//   • Muy bajo consumo de ancho de banda (cabecera mínima de 2 bytes)
-//   • Tolerante a redes inestables (reconexión automática)
-//   • Desacopla productores y consumidores: el ESP8266 publica datos
-//     sin saber quién los lee; la Raspberry Pi los recibe sin saber
-//     desde cuántos dispositivos provienen.
-//
-// Flujo de este firmware:
-//   PUBLICACIÓN  → el ESP8266 envía lecturas de sensor a MQTT_TOPICO
-//                  cada BACKGROUND_SAMPLE_MS.
-//                  Formato: {"raw":0,"percent":0.0,"state":"WET",
-//                            "watering":false,"cooldown":false}
-//
-//   SUSCRIPCIÓN  → el ESP8266 escucha comandos en MQTT_TOPICO_CMD.
-//                  La Raspberry Pi publica {"action":"water"} para
-//                  activar el riego de forma remota desde el dashboard.
+// El firmware publica un JSON al tópico cada BACKGROUND_SAMPLE_MS.
+// Formato:
+//   {"raw":0,"percent":0.0,"state":"WET","watering":false,"cooldown":false}
 //
 // Si no quieres usar MQTT, deja MQTT_SERVER vacío ("") y el firmware
 // omitirá toda la lógica MQTT sin afectar el servidor web ni el riego.
-//
-// BROKER    : servidor central (p. ej. Mosquitto en la Raspberry Pi)
-// TÓPICO    : cadena jerárquica que identifica un canal de mensajes
-// QoS       : calidad de servicio (0 = fire-and-forget, 1 = al-menos-una-vez)
-// CLIENT_ID : identifica de forma única a este dispositivo ante el broker;
-//             si dos clientes usan el mismo ID, el broker desconecta al anterior.
-
-// IP del broker (Raspberry Pi). Dejar "" para deshabilitar MQTT completamente.
-// ⚠ Cambia esta IP por la dirección real de tu Raspberry Pi en la red local.
-#define MQTT_SERVER      "192.168.1.2"         // IP de la Raspberry Pi (broker)
-#define MQTT_PORT        1883                   // Puerto TCP estándar sin TLS
-#define MQTT_CLIENT_ID   "esp8266-invernadero" // ID único por dispositivo
-
-// Tópico de PUBLICACIÓN: el ESP8266 envía lecturas de sensor aquí.
-// El servidor EM_server escucha "sensors/#" y almacena los datos.
-#define MQTT_TOPICO      "sensors/esp8266"
-
-// Tópico de SUSCRIPCIÓN: el ESP8266 escucha comandos aquí.
-// La Raspberry Pi publica {"action":"water"} para activar el riego remoto.
-#define MQTT_TOPICO_CMD  "commands/esp8266"
+#define MQTT_SERVER      "192.168.1.100"      // IP o hostname del broker
+#define MQTT_PORT        1883                  // Puerto TCP (default 1883)
+#define MQTT_CLIENT_ID   "esp8266_suelo"      // ID único por dispositivo
+#define MQTT_TOPICO      "humedadsuelo/datos" // Tópico de publicación
 
 // Autenticación — dejar vacío si el broker no requiere usuario/contraseña
 #define MQTT_USER        ""
